@@ -99,14 +99,13 @@ impl eframe::App for App {
             }
             if dirty {
                 if let Err(e) = self.table.scripts.eval() {
-                    eprintln!("found  error");
                     self.error = Some(e.to_string())
                 } else {
-                    eprintln!("found no error");
                     self.error = None;
                 }
             }
 
+            ui.separator();
             ui.text_edit_singleline(&mut self.key);
             if !self.key.is_empty()
                 && !self.table.scripts.contains_key(&self.key)

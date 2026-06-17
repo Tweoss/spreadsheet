@@ -53,7 +53,14 @@ impl TableDemo {
                 && let Some(b) = self.scripts.borrow_values().get(&key)
                 && let Some(v) = b.get(&(row_nr as usize))
             {
-                ui.label(v.to_string());
+                let text = format!("{:.2}", v);
+                let (integral, fractional) = text.split_once(".").unwrap_or((text.as_str(), ""));
+                let rev_chars: Vec<char> = integral.chars().rev().collect();
+                // Commas every three decimals.
+                let a: Vec<String> = rev_chars.chunks(3).map(|c| c.iter().collect()).collect();
+                let text = a.join(",");
+                let separated_integer: String = text.chars().rev().collect();
+                ui.label(separated_integer + "." + fractional);
                 return;
             }
         }
