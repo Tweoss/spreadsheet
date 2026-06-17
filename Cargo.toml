@@ -1,0 +1,11 @@
+[package]
+name = "modeller"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+eframe = { version = "0.34.3", features = ["persistence"] }
+egui = "0.34.3"
+egui_table = "0.8.0"
+rhai = "1.25.1"
+serde = { version = "1.0.228", features = ["serde_derive"] }
