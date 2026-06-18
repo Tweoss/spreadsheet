@@ -8,4 +8,5 @@ eframe = { version = "0.34.3", features = ["persistence"] }
 egui = "0.34.3"
 egui_table = "0.8.0"
 rhai = "1.25.1"
+ron = "0.12.1"
 serde = { version = "1.0.228", features = ["serde_derive"] }

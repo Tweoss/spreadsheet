@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, fs};
 
 use egui::{Label, RichText, ScrollArea, TextEdit, Widget};
 
@@ -9,13 +9,8 @@ use crate::table::TableDemo;
 #[serde(default)]
 pub struct App {
     key: String,
-    script: String,
-
-    #[serde(skip)] // This how you opt-out of serialization of a field
-    value: f32,
-
+    file_path: String,
     table: TableDemo,
-
     error: Option<String>,
 }
 
@@ -23,8 +18,7 @@ impl Default for App {
     fn default() -> Self {
         Self {
             key: String::new(),
-            script: "Hello World!".to_owned(),
-            value: 2.7,
+            file_path: "./data.txt".to_owned(),
             table: TableDemo::default(),
             error: None,
         }
@@ -44,7 +38,7 @@ impl App {
         } else {
             Default::default()
         };
-        out.table.scripts.init();
+        out.error = out.table.scripts.init().err();
         out
     }
 }
@@ -71,11 +65,19 @@ impl eframe::App for App {
                         if ui.button("Quit").clicked() {
                             ui.send_viewport_cmd(egui::ViewportCommand::Close);
                         }
+                        if ui.button("Save").clicked() {
+                            let to_string = ron::ser::to_string(&self);
+                            if let Ok(v) = to_string {
+                                let _ = fs::write(self.file_path.clone(), v.as_bytes());
+                            }
+                        }
                     });
                     ui.add_space(16.0);
                 }
 
                 egui::widgets::global_theme_preference_buttons(ui);
+
+                ui.text_edit_singleline(&mut self.file_path);
             });
         });
 
@@ -83,7 +85,7 @@ impl eframe::App for App {
             ScrollArea::vertical().show(ui, |ui| {
                 let mut dirty = false;
                 let mut to_remove = HashSet::new();
-                for (key, script) in self.table.scripts.scripts_mut().iter_mut() {
+                for (key, script) in self.table.scripts.borrow_mut().scripts().iter_mut() {
                     ui.horizontal(|ui| {
                         if ui.button("X").clicked() {
                             to_remove.insert(key.clone());
