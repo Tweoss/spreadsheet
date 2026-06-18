@@ -7,13 +7,15 @@ use std::{
 
 use rhai::{AST, Engine, EvalAltResult, NativeCallContext, Position, Scope};
 
+// TODO: just make a RRef Scripts?
 type RRef<T> = Rc<RefCell<T>>;
 type REngine = RRef<Engine>;
-type RScripts = RRef<HashMap<String, Script>>;
+type RScripts = RRef<BTreeMap<String, Script>>;
 type RValues = RRef<HashMap<String, BTreeMap<usize, f64>>>;
 type RCallStack = RRef<Vec<(String, usize)>>;
+type RRange = RRef<RangeInclusive<usize>>;
 
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(serde::Deserialize, serde::Serialize, Clone)]
 pub struct Scripts {
     #[serde(skip)]
     engine: REngine,
@@ -21,7 +23,7 @@ pub struct Scripts {
     values: RValues,
     #[serde(skip)]
     call_stack: RCallStack,
-    range: RangeInclusive<usize>,
+    range: RRange,
 }
 
 #[derive(serde::Deserialize, serde::Serialize, Debug)]
@@ -35,10 +37,10 @@ impl Default for Scripts {
     fn default() -> Self {
         Self {
             engine: RefCell::new(Engine::new()).into(),
-            scripts: RefCell::new(HashMap::new()).into(),
+            scripts: RefCell::new(BTreeMap::new()).into(),
             values: RefCell::new(HashMap::new()).into(),
             call_stack: RefCell::new(Vec::new()).into(),
-            range: 0..=100,
+            range: RefCell::new(0..=100).into(),
         }
     }
 }
@@ -50,23 +52,12 @@ impl Scripts {
     /// This happens because serde will use parts of the Default::default
     /// structure depending on what can be deserialized.
     pub fn init(&mut self) {
-        let engine = self.engine.clone();
-        let values = self.values.clone();
-        let scripts = self.scripts.clone();
-        let call_stack = self.call_stack.clone();
+        let clone = self.clone();
         self.engine.borrow_mut().register_fn(
             "get",
             move |ctx: NativeCallContext, key: &str, row: f64| {
                 let row = row.floor().max(0.0) as usize;
-                Self::eval_one(
-                    Some(ctx.call_position()),
-                    key,
-                    row,
-                    engine.clone(),
-                    scripts.clone(),
-                    values.clone(),
-                    call_stack.clone(),
-                )
+                clone.eval_one(Some(ctx.call_position()), key, row)
             },
         );
     }
@@ -77,18 +68,11 @@ impl Scripts {
             v.clear();
         }
         let keys: Vec<String> = self.scripts.borrow().keys().cloned().collect();
-        for i in self.range.clone() {
+        for i in self.range.borrow().clone() {
             for key in &keys {
+                // eprintln!("top level call of {key} {i}");
                 self.call_stack.borrow_mut().clear();
-                match Self::eval_one(
-                    None,
-                    key,
-                    i,
-                    self.engine.clone(),
-                    self.scripts.clone(),
-                    self.values.clone(),
-                    self.call_stack.clone(),
-                ) {
+                match self.eval_one(None, key, i) {
                     Ok(_) => {}
                     Err(err) => {
                         // Reset values.
@@ -102,18 +86,20 @@ impl Scripts {
     }
 
     fn eval_one(
+        &self,
         pos: Option<Position>,
         key: &str,
         row: usize,
-        engine: REngine,
-        scripts: RScripts,
-        values: RValues,
-        call_stack: RCallStack,
     ) -> Result<f64, Box<EvalAltResult>> {
         let key = key.to_owned();
-        if call_stack.borrow().contains(&(key.clone(), row)) {
-            call_stack.borrow_mut().push((key.clone(), row));
-            let stack: Vec<String> = call_stack
+        // eprintln!(
+        //     "eval one of {key} {row} at depth {}",
+        //     self.call_stack.borrow().len()
+        // );
+        if self.call_stack.borrow().contains(&(key.clone(), row)) {
+            self.call_stack.borrow_mut().push((key.clone(), row));
+            let stack: Vec<String> = self
+                .call_stack
                 .borrow()
                 .iter()
                 .map(|s| format!("({}, {})", s.0, s.1))
@@ -126,16 +112,30 @@ impl Scripts {
             )
             .into());
         }
-        call_stack.borrow_mut().push((key.clone(), row));
-        if let Some(v) = values.borrow().get(&key).and_then(|v| v.get(&row)) {
+        self.call_stack.borrow_mut().push((key.clone(), row));
+        if !self.range.borrow().contains(&row) {
+            return Err(EvalAltResult::ErrorRuntime(
+                (format!(
+                    "Row index {row} of \"{key}\" out of range [{},{}]",
+                    self.range.borrow().start(),
+                    self.range.borrow().end()
+                ))
+                .into(),
+                pos.unwrap_or_default(),
+            )
+            .into());
+        }
+        if let Some(v) = self.values.borrow().get(&key).and_then(|v| v.get(&row)) {
+            // eprintln!("eval one of {key} {row} read from cache");
+            self.call_stack.borrow_mut().pop();
             return Ok(*v);
         }
-        let mut borrow = scripts.borrow_mut();
+        let mut borrow = self.scripts.borrow_mut();
         let ast = if let Some(script) = borrow.get_mut(&key) {
             if let Some(ast) = &script.ast {
                 ast.clone()
             } else {
-                let ast = engine.borrow().compile(wrap_script(&script.text))?;
+                let ast = self.engine.borrow().compile(wrap_script(&script.text))?;
                 script.ast = Some(ast);
                 script.ast.as_ref().unwrap().clone()
             }
@@ -146,16 +146,17 @@ impl Scripts {
         };
         drop(borrow);
         let value =
-            engine
+            self.engine
                 .borrow()
                 .call_fn::<f64>(&mut Scope::new(), &ast, "run", (row as f64,))?;
-        values
+        self.values
             .borrow_mut()
             .entry(key.to_owned())
             .or_default()
             .insert(row, value);
 
-        call_stack.borrow_mut().pop();
+        // eprintln!("eval one of {key} {row} finished eval");
+        self.call_stack.borrow_mut().pop();
 
         Ok(value)
     }
@@ -178,14 +179,14 @@ impl Scripts {
 
     pub fn set_num_rows(&mut self, count: usize) -> Result<(), Box<EvalAltResult>> {
         if count > 0 {
-            self.range = 0..=(count - 1);
+            *self.range.borrow_mut() = 0..=(count - 1);
             self.eval()
         } else {
             Ok(())
         }
     }
     pub fn num_rows(&self) -> usize {
-        self.range.end() + 1
+        self.range.borrow().end() + 1
     }
 
     pub fn key_count(&self) -> usize {
@@ -196,7 +197,7 @@ impl Scripts {
         self.scripts.borrow().keys().nth(n).cloned()
     }
 
-    pub fn scripts_mut(&self) -> std::cell::RefMut<'_, HashMap<String, Script>> {
+    pub fn scripts_mut(&self) -> std::cell::RefMut<'_, BTreeMap<String, Script>> {
         self.scripts.borrow_mut()
     }
 
