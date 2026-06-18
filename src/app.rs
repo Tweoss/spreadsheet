@@ -1,8 +1,12 @@
 use std::{collections::HashSet, fs};
 
 use egui::{Label, RichText, ScrollArea, TextEdit, Widget};
+use egui_tiles::Tree;
 
-use crate::table::TableDemo;
+use crate::{
+    table::TableDemo,
+    tree::{Pane, TreeBehavior, create_tree},
+};
 
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -12,6 +16,7 @@ pub struct App {
     file_path: String,
     table: TableDemo,
     error: Option<String>,
+    tree: Tree<Pane>,
 }
 
 impl Default for App {
@@ -21,6 +26,7 @@ impl Default for App {
             file_path: "./data.txt".to_owned(),
             table: TableDemo::default(),
             error: None,
+            tree: create_tree(),
         }
     }
 }
@@ -81,50 +87,6 @@ impl eframe::App for App {
             });
         });
 
-        egui::Panel::right("editor_panel").show_inside(ui, |ui| {
-            ScrollArea::vertical().show(ui, |ui| {
-                let mut dirty = false;
-                let mut to_remove = HashSet::new();
-                for (key, script) in self.table.scripts.borrow_mut().scripts().iter_mut() {
-                    ui.horizontal(|ui| {
-                        if ui.button("X").clicked() {
-                            to_remove.insert(key.clone());
-                        }
-                        ui.heading(key);
-                    });
-
-                    if TextEdit::multiline(&mut script.text)
-                        .desired_rows(1)
-                        .ui(ui)
-                        .changed()
-                    {
-                        dirty = true;
-                        script.ast = None;
-                    }
-                }
-                for key in to_remove {
-                    self.table.scripts.remove_script(&key);
-                }
-                if dirty {
-                    if let Err(e) = self.table.scripts.eval() {
-                        self.error = Some(e.to_string())
-                    } else {
-                        self.error = None;
-                    }
-                }
-
-                ui.separator();
-                ui.text_edit_singleline(&mut self.key);
-                if !self.key.is_empty()
-                    && !self.table.scripts.contains_key(&self.key)
-                    && ui.button("Add Column").clicked()
-                {
-                    self.table.scripts.add_script(self.key.clone());
-                    self.key = String::new();
-                }
-            });
-        });
-
         egui::CentralPanel::default().show_inside(ui, |ui| {
             if let Some(e) = &self.error {
                 Label::new(RichText::new(e).strong()).ui(&mut *ui);
@@ -132,9 +94,12 @@ impl eframe::App for App {
 
             ui.separator();
 
-            if let Err(e) = self.table.ui(ui) {
-                self.error = Some(e.to_string());
-            }
+            let mut behavior = TreeBehavior {
+                table: &mut self.table,
+                error: &mut self.error,
+                key: &mut self.key,
+            };
+            self.tree.ui(&mut behavior, ui);
 
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                 egui::warn_if_debug_build(ui);
