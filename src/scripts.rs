@@ -1,5 +1,5 @@
 use std::{
-    cell::RefCell,
+    cell::{Ref, RefCell, RefMut},
     collections::{BTreeMap, HashMap},
     ops::RangeInclusive,
     rc::Rc,
@@ -9,21 +9,20 @@ use rhai::{AST, Engine, EvalAltResult, NativeCallContext, Position, Scope};
 
 // TODO: just make a RRef Scripts?
 type RRef<T> = Rc<RefCell<T>>;
-type REngine = RRef<Engine>;
-type RScripts = RRef<BTreeMap<String, Script>>;
-type RValues = RRef<HashMap<String, BTreeMap<usize, f64>>>;
-type RCallStack = RRef<Vec<(String, usize)>>;
-type RRange = RRef<RangeInclusive<usize>>;
 
-#[derive(serde::Deserialize, serde::Serialize, Clone)]
-pub struct Scripts {
+#[derive(serde::Deserialize, serde::Serialize, Clone, Default)]
+pub struct Scripts(RRef<ScriptsInner>);
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct ScriptsInner {
     #[serde(skip)]
-    engine: REngine,
-    scripts: RScripts,
-    values: RValues,
+    engine: RRef<Engine>,
+    scripts: BTreeMap<String, Script>,
     #[serde(skip)]
-    call_stack: RCallStack,
-    range: RRange,
+    values: HashMap<String, BTreeMap<usize, f64>>,
+    #[serde(skip)]
+    call_stack: Vec<(String, usize)>,
+    range: RangeInclusive<usize>,
 }
 
 #[derive(serde::Deserialize, serde::Serialize, Debug)]
@@ -33,14 +32,14 @@ pub struct Script {
     pub ast: Option<AST>,
 }
 
-impl Default for Scripts {
+impl Default for ScriptsInner {
     fn default() -> Self {
         Self {
             engine: RefCell::new(Engine::new()).into(),
-            scripts: RefCell::new(BTreeMap::new()).into(),
-            values: RefCell::new(HashMap::new()).into(),
-            call_stack: RefCell::new(Vec::new()).into(),
-            range: RefCell::new(0..=100).into(),
+            scripts: (BTreeMap::new()),
+            values: (HashMap::new()),
+            call_stack: (Vec::new()),
+            range: (0..=100),
         }
     }
 }
@@ -51,33 +50,40 @@ impl Scripts {
     ///
     /// This happens because serde will use parts of the Default::default
     /// structure depending on what can be deserialized.
-    pub fn init(&mut self) {
+    pub fn init(&mut self) -> Result<(), String> {
         let clone = self.clone();
-        self.engine.borrow_mut().register_fn(
+        self.0.borrow_mut().engine.borrow_mut().register_fn(
             "get",
             move |ctx: NativeCallContext, key: &str, row: f64| {
                 let row = row.floor().max(0.0) as usize;
                 clone.eval_one(Some(ctx.call_position()), key, row)
             },
         );
+        self.eval()
     }
 
-    pub fn eval(&mut self) -> Result<(), Box<EvalAltResult>> {
-        let old_values = self.values.borrow_mut().clone();
-        for v in self.values.borrow_mut().values_mut() {
+    pub fn eval(&mut self) -> Result<(), String> {
+        let mut inner = self.0.borrow_mut();
+        let old_values = inner.values.clone();
+        for v in inner.values.values_mut() {
             v.clear();
         }
-        let keys: Vec<String> = self.scripts.borrow().keys().cloned().collect();
-        for i in self.range.borrow().clone() {
+        let keys: Vec<String> = inner.scripts.keys().cloned().collect();
+        let range = inner.range.clone();
+        drop(inner);
+        for i in range {
             for key in &keys {
                 // eprintln!("top level call of {key} {i}");
-                self.call_stack.borrow_mut().clear();
+
+                // In theory should be clear anyways.
+                self.0.borrow_mut().call_stack.clear();
+
                 match self.eval_one(None, key, i) {
                     Ok(_) => {}
                     Err(err) => {
                         // Reset values.
-                        *self.values.borrow_mut() = old_values;
-                        return Err(err);
+                        self.0.borrow_mut().values = old_values;
+                        return Err(format!("In {key}[{i}], {err}"));
                     }
                 };
             }
@@ -96,11 +102,18 @@ impl Scripts {
         //     "eval one of {key} {row} at depth {}",
         //     self.call_stack.borrow().len()
         // );
-        if self.call_stack.borrow().contains(&(key.clone(), row)) {
-            self.call_stack.borrow_mut().push((key.clone(), row));
-            let stack: Vec<String> = self
+        let mut inner = self.0.borrow_mut();
+        let ScriptsInner {
+            scripts,
+            values,
+            call_stack,
+            range,
+            engine,
+        } = &mut *inner;
+        if call_stack.contains(&(key.clone(), row)) {
+            call_stack.push((key.clone(), row));
+            let stack: Vec<String> = inner
                 .call_stack
-                .borrow()
                 .iter()
                 .map(|s| format!("({}, {})", s.0, s.1))
                 .collect();
@@ -112,30 +125,29 @@ impl Scripts {
             )
             .into());
         }
-        self.call_stack.borrow_mut().push((key.clone(), row));
-        if !self.range.borrow().contains(&row) {
+        call_stack.push((key.clone(), row));
+        if !range.contains(&row) {
             return Err(EvalAltResult::ErrorRuntime(
                 (format!(
                     "Row index {row} of \"{key}\" out of range [{},{}]",
-                    self.range.borrow().start(),
-                    self.range.borrow().end()
+                    range.start(),
+                    range.end()
                 ))
                 .into(),
                 pos.unwrap_or_default(),
             )
             .into());
         }
-        if let Some(v) = self.values.borrow().get(&key).and_then(|v| v.get(&row)) {
+        if let Some(v) = values.get(&key).and_then(|v| v.get(&row)) {
             // eprintln!("eval one of {key} {row} read from cache");
-            self.call_stack.borrow_mut().pop();
+            call_stack.pop();
             return Ok(*v);
         }
-        let mut borrow = self.scripts.borrow_mut();
-        let ast = if let Some(script) = borrow.get_mut(&key) {
+        let ast = if let Some(script) = scripts.get_mut(&key) {
             if let Some(ast) = &script.ast {
                 ast.clone()
             } else {
-                let ast = self.engine.borrow().compile(wrap_script(&script.text))?;
+                let ast = engine.borrow_mut().compile(wrap_script(&script.text))?;
                 script.ast = Some(ast);
                 script.ast.as_ref().unwrap().clone()
             }
@@ -144,31 +156,33 @@ impl Scripts {
                 EvalAltResult::ErrorModuleNotFound(key.to_owned(), Position::default()).into(),
             );
         };
-        drop(borrow);
+        let engine = engine.clone();
+        drop(inner);
         let value =
-            self.engine
+            engine
                 .borrow()
                 .call_fn::<f64>(&mut Scope::new(), &ast, "run", (row as f64,))?;
-        self.values
-            .borrow_mut()
+        let mut inner = self.0.borrow_mut();
+        inner
+            .values
             .entry(key.to_owned())
             .or_default()
             .insert(row, value);
 
         // eprintln!("eval one of {key} {row} finished eval");
-        self.call_stack.borrow_mut().pop();
+        inner.call_stack.pop();
 
         Ok(value)
     }
 
     pub fn contains_key(&self, key: &str) -> bool {
-        self.scripts.borrow().contains_key(key)
+        self.0.borrow().scripts.contains_key(key)
     }
     pub fn remove_script(&mut self, key: &str) {
-        self.scripts.borrow_mut().remove(key);
+        self.0.borrow_mut().scripts.remove(key);
     }
     pub fn add_script(&mut self, key: String) {
-        self.scripts.borrow_mut().insert(
+        self.0.borrow_mut().scripts.insert(
             key,
             Script {
                 text: String::new(),
@@ -177,32 +191,51 @@ impl Scripts {
         );
     }
 
-    pub fn set_num_rows(&mut self, count: usize) -> Result<(), Box<EvalAltResult>> {
+    pub fn set_num_rows(&mut self, count: usize) -> Result<(), String> {
         if count > 0 {
-            *self.range.borrow_mut() = 0..=(count - 1);
+            self.0.borrow_mut().range = 0..=(count - 1);
             self.eval()
         } else {
             Ok(())
         }
     }
     pub fn num_rows(&self) -> usize {
-        self.range.borrow().end() + 1
+        self.0.borrow().range.end() + 1
     }
 
     pub fn key_count(&self) -> usize {
-        self.scripts.borrow().keys().len()
+        self.0.borrow().scripts.keys().len()
     }
 
     pub fn nth_key(&self, n: usize) -> Option<String> {
-        self.scripts.borrow().keys().nth(n).cloned()
+        self.0.borrow().scripts.keys().nth(n).cloned()
     }
 
-    pub fn scripts_mut(&self) -> std::cell::RefMut<'_, BTreeMap<String, Script>> {
-        self.scripts.borrow_mut()
+    pub fn borrow(&self) -> ScriptGuard<'_> {
+        let guard = self.0.borrow();
+        ScriptGuard { guard }
     }
 
-    pub fn borrow_values(&self) -> std::cell::Ref<'_, HashMap<String, BTreeMap<usize, f64>>> {
-        self.values.borrow()
+    pub fn borrow_mut(&mut self) -> ScriptGuardMut<'_> {
+        let guard = self.0.borrow_mut();
+        ScriptGuardMut { guard }
+    }
+}
+
+pub struct ScriptGuard<'a> {
+    guard: Ref<'a, ScriptsInner>,
+}
+impl ScriptGuard<'_> {
+    pub fn values(&self) -> &HashMap<String, BTreeMap<usize, f64>> {
+        &self.guard.values
+    }
+}
+pub struct ScriptGuardMut<'a> {
+    guard: RefMut<'a, ScriptsInner>,
+}
+impl ScriptGuardMut<'_> {
+    pub fn scripts(&mut self) -> &mut BTreeMap<String, Script> {
+        &mut self.guard.scripts
     }
 }
 

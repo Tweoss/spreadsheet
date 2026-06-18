@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use egui::{Align2, Color32, Context, Id, Margin, NumExt as _, RichText, Sense, Theme, Ui, Vec2};
+use egui::{Align2, Color32, Context, Id, Margin, NumExt as _, RichText, Sense, Ui, Vec2};
 use rhai::EvalAltResult;
 
 use crate::scripts::Scripts;
@@ -50,7 +50,7 @@ impl TableDemo {
         if col_nr >= self.num_sticky_cols {
             let key_index = col_nr - self.num_sticky_cols;
             if let Some(key) = (self.scripts.nth_key(key_index))
-                && let Some(b) = self.scripts.borrow_values().get(&key)
+                && let Some(b) = self.scripts.borrow().values().get(&key)
                 && let Some(v) = b.get(&(row_nr as usize))
             {
                 let text = format!("{:.2}", v);
