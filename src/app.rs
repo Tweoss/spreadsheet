@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
-use egui::{Label, RichText, Widget};
+use egui::{Label, RichText, ScrollArea, TextEdit, Widget};
 
-use crate::{scripts::wrap_script, table::TableDemo};
+use crate::table::TableDemo;
 
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -80,56 +80,55 @@ impl eframe::App for App {
         });
 
         egui::Panel::right("editor_panel").show_inside(ui, |ui| {
-            let mut dirty = false;
-            let mut to_remove = HashSet::new();
-            for (key, script) in self.table.scripts.scripts_mut().iter_mut() {
-                ui.horizontal(|ui| {
-                    if ui.button("X").clicked() {
-                        to_remove.insert(key.clone());
-                    }
-                    ui.heading(key);
-                });
-                if ui.text_edit_multiline(&mut script.text).changed() {
-                    dirty = true;
-                    script.ast = None;
-                }
-            }
-            for key in to_remove {
-                self.table.scripts.remove_script(&key);
-            }
-            if dirty {
-                if let Err(e) = self.table.scripts.eval() {
-                    self.error = Some(e.to_string())
-                } else {
-                    self.error = None;
-                }
-            }
+            ScrollArea::vertical().show(ui, |ui| {
+                let mut dirty = false;
+                let mut to_remove = HashSet::new();
+                for (key, script) in self.table.scripts.scripts_mut().iter_mut() {
+                    ui.horizontal(|ui| {
+                        if ui.button("X").clicked() {
+                            to_remove.insert(key.clone());
+                        }
+                        ui.heading(key);
+                    });
 
-            ui.separator();
-            ui.text_edit_singleline(&mut self.key);
-            if !self.key.is_empty()
-                && !self.table.scripts.contains_key(&self.key)
-                && ui.button("Add Column").clicked()
-            {
-                self.table.scripts.add_script(self.key.clone());
-                self.key = String::new();
-            }
+                    if TextEdit::multiline(&mut script.text)
+                        .desired_rows(1)
+                        .ui(ui)
+                        .changed()
+                    {
+                        dirty = true;
+                        script.ast = None;
+                    }
+                }
+                for key in to_remove {
+                    self.table.scripts.remove_script(&key);
+                }
+                if dirty {
+                    if let Err(e) = self.table.scripts.eval() {
+                        self.error = Some(e.to_string())
+                    } else {
+                        self.error = None;
+                    }
+                }
+
+                ui.separator();
+                ui.text_edit_singleline(&mut self.key);
+                if !self.key.is_empty()
+                    && !self.table.scripts.contains_key(&self.key)
+                    && ui.button("Add Column").clicked()
+                {
+                    self.table.scripts.add_script(self.key.clone());
+                    self.key = String::new();
+                }
+            });
         });
 
         egui::CentralPanel::default().show_inside(ui, |ui| {
-            // The central panel the region left after adding TopPanel's and SidePanel's
-            ui.heading("eframe template");
-
             if let Some(e) = &self.error {
                 Label::new(RichText::new(e).strong()).ui(&mut *ui);
             }
 
             ui.separator();
-
-            ui.add(egui::github_link_file!(
-                "https://github.com/emilk/eframe_template/blob/main/",
-                "Source code."
-            ));
 
             if let Err(e) = self.table.ui(ui) {
                 self.error = Some(e.to_string());
