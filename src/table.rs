@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use egui::{Align2, Context, Id, Margin, NumExt as _, Sense, Ui, Vec2};
+use egui::{Align2, Color32, Context, Id, Margin, NumExt as _, RichText, Sense, Theme, Ui, Vec2};
 use rhai::EvalAltResult;
 
 use crate::scripts::Scripts;
@@ -54,13 +54,22 @@ impl TableDemo {
                 && let Some(v) = b.get(&(row_nr as usize))
             {
                 let text = format!("{:.2}", v);
+                if *v == 0.0 {
+                    ui.label(RichText::new(text).color(Color32::GRAY));
+                    return;
+                }
                 let (integral, fractional) = text.split_once(".").unwrap_or((text.as_str(), ""));
                 let rev_chars: Vec<char> = integral.chars().rev().collect();
                 // Commas every three decimals.
                 let a: Vec<String> = rev_chars.chunks(3).map(|c| c.iter().collect()).collect();
                 let text = a.join(",");
                 let separated_integer: String = text.chars().rev().collect();
-                ui.label(separated_integer + "." + fractional);
+                let strong = if ui.ctx().theme().default_visuals().dark_mode {
+                    Color32::WHITE
+                } else {
+                    Color32::BLACK
+                };
+                ui.label(RichText::new(separated_integer + "." + fractional).color(strong));
                 return;
             }
         }
@@ -264,23 +273,6 @@ impl TableDemo {
             ui.add(egui::DragValue::new(&mut self.row_height).range(0.0..=100.0));
             ui.end_row();
 
-            ui.label("Sticky columns");
-            ui.add(egui::DragValue::new(&mut self.num_sticky_cols));
-            ui.end_row();
-
-            ui.label("Default column width");
-            ui.add(egui::DragValue::new(&mut self.default_column.current));
-            ui.end_row();
-
-            ui.label("Column width range");
-            ui.horizontal(|ui| {
-                let range = &mut self.default_column.range;
-                ui.add(egui::DragValue::new(&mut range.min).range(0.0..=range.max));
-                ui.label("to");
-                ui.add(egui::DragValue::new(&mut range.max).range(range.min..=1000.0));
-            });
-            ui.end_row();
-
             ui.label("Auto-size mode");
             ui.horizontal(|ui| {
                 ui.radio_value(
@@ -305,81 +297,13 @@ impl TableDemo {
         response.inner?;
 
         let id_salt = Id::new("table_demo");
-        let state_id = egui_table::Table::new().id_salt(id_salt).get_id(ui); // Note: must be here (in the correct outer `ui` scope) to be correct.
-
-        ui.horizontal(|ui| {
-            if ui.button("Reset settings").clicked() {
-                *self = Self::default();
-            }
-            if ui.button("Reset state").clicked() {
-                debug_assert!(
-                    egui_table::TableState::load(ui, state_id).is_some(),
-                    "Wrong state_id"
-                );
-                egui_table::TableState::reset(ui, state_id);
-            }
-        });
+        egui_table::Table::new().id_salt(id_salt).get_id(ui); // Note: must be here (in the correct outer `ui` scope) to be correct.
 
         ui.separator();
 
-        ui.horizontal(|ui| {
-            // for info in &self.prefetched {
-            //     ui.label("Visible columns:");
-            //     ui.label(format!(
-            //         "{}..{}",
-            //         info.visible_columns.start, info.visible_columns.end
-            //     ));
+        self.prefetched.clear();
 
-            //     ui.label("rows:");
-            //     ui.label(format!(
-            //         "{}..{}",
-            //         info.visible_rows.start, info.visible_rows.end
-            //     ));
-            // }
-            self.prefetched.clear();
-        });
-
-        let first_scrollable_col = self.num_sticky_cols;
-        let last_col = self.num_sticky_cols + self.scripts.key_count().saturating_sub(1);
-        let mid_col = usize::midpoint(first_scrollable_col, last_col);
-        let mut scroll_to_column = None;
-        ui.horizontal(|ui| {
-            ui.label("Scroll horizontally to…");
-            if ui.button("left").clicked() {
-                scroll_to_column = Some(first_scrollable_col);
-            }
-            if ui.button("middle").clicked() {
-                scroll_to_column = Some(mid_col);
-            }
-            if ui.button("right").clicked() {
-                scroll_to_column = Some(last_col);
-            }
-            if ui.button(format!("column {mid_col}")).clicked() {
-                scroll_to_column = Some(mid_col);
-            }
-        });
-
-        let mut scroll_to_row = None;
-        ui.horizontal(|ui| {
-            ui.label("Scroll vertically to…");
-            if ui.button("top").clicked() {
-                scroll_to_row = Some(0);
-            }
-            if ui.button("middle").clicked() {
-                scroll_to_row = Some(self.scripts.num_rows() / 2);
-            }
-            if ui.button("bottom").clicked() {
-                scroll_to_row = Some(self.scripts.num_rows().saturating_sub(1));
-            }
-            let mid_row = self.scripts.num_rows() / 2;
-            if ui.button(format!("row {mid_row}")).clicked() {
-                scroll_to_row = Some(mid_row);
-            }
-        });
-
-        ui.separator();
-
-        let mut table = egui_table::Table::new()
+        let table = egui_table::Table::new()
             .id_salt(id_salt)
             .num_rows(self.scripts.num_rows() as u64)
             .columns(vec![
@@ -397,13 +321,6 @@ impl TableDemo {
                 egui_table::HeaderRow::new(self.top_row_height),
             ])
             .auto_size_mode(self.auto_size_mode);
-
-        if let Some(scroll_to_column) = scroll_to_column {
-            table = table.scroll_to_column(scroll_to_column, None);
-        }
-        if let Some(scroll_to_row) = scroll_to_row {
-            table = table.scroll_to_row(scroll_to_row as u64, None);
-        }
 
         table.show(ui, self);
         Ok(())
