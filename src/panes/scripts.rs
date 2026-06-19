@@ -13,28 +13,28 @@ pub fn edit_scripts_ui(
         let mut to_remove = HashSet::new();
         let mut scripts = tree.table.scripts.borrow_mut();
         for (group, headers) in &tree.table.groups {
-            ui.heading(group);
+            ui.collapsing(group, |ui| {
+                for key in headers {
+                    let script = scripts.scripts().get_mut(key).unwrap_or_else(|| {
+                        panic!("should have script for {key} when groups contains key {key}")
+                    });
+                    ui.horizontal(|ui| {
+                        if ui.button("X").clicked() {
+                            to_remove.insert(key.clone());
+                        }
+                        ui.heading(key);
+                    });
 
-            for key in headers {
-                let script = scripts.scripts().get_mut(key).unwrap_or_else(|| {
-                    panic!("should have script for {key} when groups contains key {key}")
-                });
-                ui.horizontal(|ui| {
-                    if ui.button("X").clicked() {
-                        to_remove.insert(key.clone());
+                    if TextEdit::multiline(&mut script.text)
+                        .desired_rows(1)
+                        .ui(ui)
+                        .changed()
+                    {
+                        dirty = true;
+                        script.ast = None;
                     }
-                    ui.heading(key);
-                });
-
-                if TextEdit::multiline(&mut script.text)
-                    .desired_rows(1)
-                    .ui(ui)
-                    .changed()
-                {
-                    dirty = true;
-                    script.ast = None;
                 }
-            }
+            });
         }
         drop(scripts);
 
