@@ -109,11 +109,11 @@ impl Scripts {
         } = &mut *inner;
         if call_stack.contains(&(key.clone(), row)) {
             call_stack.push((key.clone(), row));
-            let stack: Vec<String> = inner
-                .call_stack
+            let stack: Vec<String> = call_stack
                 .iter()
                 .map(|s| format!("({}, {})", s.0, s.1))
                 .collect();
+            call_stack.pop();
             let stack = stack.join(" -> ");
 
             return Err(EvalAltResult::ErrorRuntime(
@@ -124,6 +124,7 @@ impl Scripts {
         }
         call_stack.push((key.clone(), row));
         if !range.contains(&row) {
+            call_stack.pop();
             return Err(EvalAltResult::ErrorRuntime(
                 (format!(
                     "Row index {row} of \"{key}\" out of range [{},{}]",
@@ -149,6 +150,7 @@ impl Scripts {
                 script.ast.as_ref().unwrap().clone()
             }
         } else {
+            call_stack.pop();
             return Err(
                 EvalAltResult::ErrorModuleNotFound(key.to_owned(), Position::default()).into(),
             );
@@ -156,9 +158,16 @@ impl Scripts {
         let engine = engine.clone();
         drop(inner);
         let value =
-            engine
+            match engine
                 .borrow()
-                .call_fn::<f64>(&mut Scope::new(), &ast, "run", (row as f64,))?;
+                .call_fn::<f64>(&mut Scope::new(), &ast, "run", (row as f64,))
+            {
+                Ok(value) => value,
+                Err(e) => {
+                    self.0.borrow_mut().call_stack.pop();
+                    return Err(Box::new(*e));
+                }
+            };
         let mut inner = self.0.borrow_mut();
         inner
             .values

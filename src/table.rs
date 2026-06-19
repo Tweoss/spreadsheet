@@ -43,12 +43,19 @@ impl TableDemo {
         // Make sure we list all script keys in the columns.
         let binding = self.scripts.borrow();
         let mut script_keys: HashSet<_> = binding.scripts().keys().collect();
-        for (_, columns) in &self.groups {
-            for key in columns {
-                // If the list of script keys doesn't contain this key, then
-                // drop it.
-                if !script_keys.remove(key) {}
+        let mut to_remove = Vec::new();
+        for (i, (_, columns)) in self.groups.iter().enumerate() {
+            for (j, key) in columns.iter().enumerate() {
+                // If the list of script keys doesn't contain this key, then drop it.
+                if !script_keys.remove(key) {
+                    to_remove.push((i, j));
+                }
             }
+        }
+        // Drop the extra keys. In reverse order, otherwise indices will be invalidated.
+        to_remove.reverse();
+        for (i, j) in to_remove {
+            self.groups[i].1.remove(j);
         }
         let remaining: Vec<_> = script_keys.iter().map(|k| (*k).clone()).collect();
         if !remaining.is_empty() {
@@ -208,8 +215,10 @@ impl egui_table::TableDelegate for TableDemo {
                             },
                         );
                     } else {
+                        let flattened_headers: Vec<_> =
+                            self.groups.iter().flat_map(|g| g.1.iter()).collect();
                         let key_index = col_range.start - self.num_sticky_cols;
-                        if let Some(key) = self.scripts.nth_key(key_index) {
+                        if let Some(key) = flattened_headers.get(key_index) {
                             ui.heading(key.to_string());
                         } else {
                             ui.heading(format!("Column {group_index}"));
