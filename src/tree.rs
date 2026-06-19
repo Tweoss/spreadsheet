@@ -1,30 +1,50 @@
 use std::{collections::HashSet, fmt::Display};
 
 use egui::{ScrollArea, TextEdit, Widget};
+use egui_tiles::SimplificationOptions;
 
-use crate::table::TableDemo;
+use crate::{
+    dnd::{DnDView, DragAndDropDemo},
+    table::TableDemo,
+};
 
 #[derive(serde::Deserialize, serde::Serialize)]
 pub struct Pane {
     pub kind: PaneKind,
 }
 
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(serde::Deserialize, serde::Serialize, Clone)]
 pub enum PaneKind {
     Table,
     Scripts,
+    Groups { view: DnDView },
+}
+
+impl PaneKind {
+    pub fn enumerate_default() -> Vec<Self> {
+        vec![
+            Self::Table,
+            Self::Scripts,
+            Self::Groups {
+                view: DnDView::default(),
+            },
+        ]
+    }
+    pub fn str(&self) -> &'static str {
+        Self::enumerate_str()[match self {
+            PaneKind::Table => 0,
+            PaneKind::Scripts => 1,
+            PaneKind::Groups { .. } => 2,
+        }]
+    }
+    pub fn enumerate_str() -> &'static [&'static str] {
+        &["Table", "Scripts", "Groups"]
+    }
 }
 
 impl Display for PaneKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                PaneKind::Table => "Table",
-                PaneKind::Scripts => "Scripts",
-            }
-        )
+        write!(f, "{}", self.str())
     }
 }
 
@@ -39,23 +59,24 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         pane.kind.to_string().into()
     }
 
+    fn simplification_options(&self) -> egui_tiles::SimplificationOptions {
+        SimplificationOptions {
+            all_panes_must_have_tabs: true,
+            ..Default::default()
+        }
+    }
+
+    fn is_tab_closable(&self, _: &egui_tiles::Tiles<Pane>, _: egui_tiles::TileId) -> bool {
+        true
+    }
+
     fn pane_ui(
         &mut self,
         ui: &mut egui::Ui,
         _tile_id: egui_tiles::TileId,
         pane: &mut Pane,
     ) -> egui_tiles::UiResponse {
-        // You can make your pane draggable like so:
-        let response = if ui
-            .add(egui::Button::new("Drag me!").sense(egui::Sense::drag()))
-            .drag_started()
-        {
-            egui_tiles::UiResponse::DragStarted
-        } else {
-            egui_tiles::UiResponse::None
-        };
-
-        match pane.kind {
+        match &mut pane.kind {
             PaneKind::Table => {
                 if let Err(e) = self.table.ui(ui) {
                     *self.error = Some(e.to_string());
@@ -103,8 +124,15 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                     }
                 });
             }
+            PaneKind::Groups { view } => {
+                (DragAndDropDemo {
+                    columns: &mut self.table.groups,
+                    view,
+                })
+                .ui(ui);
+            }
         }
-        response
+        egui_tiles::UiResponse::None
     }
 }
 
@@ -117,7 +145,13 @@ pub fn create_tree() -> egui_tiles::Tree<Pane> {
     let scripts = tiles.insert_pane(Pane {
         kind: PaneKind::Scripts,
     });
-    let root = tiles.insert_vertical_tile(vec![table, scripts]);
+    let groups = tiles.insert_pane(Pane {
+        kind: PaneKind::Groups {
+            view: DnDView::default(),
+        },
+    });
+    let left = tiles.insert_tab_tile(vec![table, groups]);
+    let root = tiles.insert_horizontal_tile(vec![left, scripts]);
 
     egui_tiles::Tree::new("my_tree", root, tiles)
 }

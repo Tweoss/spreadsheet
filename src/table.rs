@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use egui::{Align2, Color32, Context, Id, Margin, NumExt as _, RichText, Sense, Ui, Vec2};
 use rhai::EvalAltResult;
@@ -15,6 +15,7 @@ pub struct TableDemo {
     is_row_expanded: BTreeMap<u64, bool>,
     prefetched: Vec<egui_table::PrefetchInfo>,
     pub scripts: Scripts,
+    pub groups: Vec<(String, Vec<String>)>,
 }
 
 impl Default for TableDemo {
@@ -30,11 +31,33 @@ impl Default for TableDemo {
             is_row_expanded: Default::default(),
             prefetched: vec![],
             scripts: Scripts::default(),
+            groups: Vec::new(),
         }
     }
 }
 
 impl TableDemo {
+    pub fn init(&mut self) -> Result<(), String> {
+        self.scripts.init()?;
+
+        // Make sure we list all script keys in the columns.
+        let binding = self.scripts.borrow();
+        let mut script_keys: HashSet<_> = binding.scripts().keys().collect();
+        for (_, columns) in &self.groups {
+            for key in columns {
+                // If the list of script keys doesn't contain this key, then
+                // drop it.
+                if !script_keys.remove(key) {}
+            }
+        }
+        let remaining: Vec<_> = script_keys.iter().map(|k| (*k).clone()).collect();
+        if !remaining.is_empty() {
+            self.groups.push(("Remaining".to_string(), remaining));
+        }
+        drop(binding);
+        Ok(())
+    }
+
     fn was_row_prefetched(&self, row_nr: u64) -> bool {
         self.prefetched
             .iter()
@@ -146,8 +169,7 @@ impl egui_table::TableDelegate for TableDemo {
                     if 0 < col_range.start {
                         // Our special grouped column.
                         let sticky = true;
-                        let text = format!("Group {group_index}");
-                        // let text = format!("This is group {group_index}");
+                        let text = self.groups[*group_index].0.to_string();
                         if sticky {
                             let font_id = egui::TextStyle::Heading.resolve(ui.style());
                             let text_color = ui.visuals().text_color();
@@ -303,20 +325,27 @@ impl TableDemo {
 
         self.prefetched.clear();
 
+        let mut sum = self.num_sticky_cols;
+        let header_groups = self
+            .groups
+            .iter()
+            .map(|(_, cols)| {
+                let next = sum + cols.len();
+                let range = sum..next;
+                sum = next;
+                range
+            })
+            .collect();
+
         let table = egui_table::Table::new()
             .id_salt(id_salt)
             .num_rows(self.scripts.num_rows() as u64)
-            .columns(vec![
-                self.default_column;
-                self.num_sticky_cols + self.scripts.key_count()
-            ])
+            .columns(vec![self.default_column; sum])
             .num_sticky_cols(self.num_sticky_cols)
             .headers([
                 egui_table::HeaderRow {
                     height: self.top_row_height,
-                    groups: vec![],
-                    // TODO: add groups?
-                    // groups: vec![0..1, 1..4, 4..8, 8..12],
+                    groups: header_groups,
                 },
                 egui_table::HeaderRow::new(self.top_row_height),
             ])

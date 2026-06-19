@@ -7,16 +7,13 @@ use std::{
 
 use rhai::{AST, Engine, EvalAltResult, NativeCallContext, Position, Scope};
 
-// TODO: just make a RRef Scripts?
-type RRef<T> = Rc<RefCell<T>>;
-
 #[derive(serde::Deserialize, serde::Serialize, Clone, Default)]
-pub struct Scripts(RRef<ScriptsInner>);
+pub struct Scripts(Rc<RefCell<ScriptsInner>>);
 
 #[derive(serde::Deserialize, serde::Serialize)]
 struct ScriptsInner {
     #[serde(skip)]
-    engine: RRef<Engine>,
+    engine: Rc<RefCell<Engine>>,
     scripts: BTreeMap<String, Script>,
     #[serde(skip)]
     values: HashMap<String, BTreeMap<usize, f64>>,
@@ -75,8 +72,8 @@ impl Scripts {
             for key in &keys {
                 // eprintln!("top level call of {key} {i}");
 
-                // In theory should be clear anyways.
-                self.0.borrow_mut().call_stack.clear();
+                // Should have popped off the stack.
+                assert!(self.0.borrow_mut().call_stack.is_empty());
 
                 match self.eval_one(None, key, i) {
                     Ok(_) => {}
@@ -98,11 +95,11 @@ impl Scripts {
         row: usize,
     ) -> Result<f64, Box<EvalAltResult>> {
         let key = key.to_owned();
+        let mut inner = self.0.borrow_mut();
         // eprintln!(
         //     "eval one of {key} {row} at depth {}",
-        //     self.call_stack.borrow().len()
+        //     inner.call_stack.len()
         // );
-        let mut inner = self.0.borrow_mut();
         let ScriptsInner {
             scripts,
             values,
@@ -147,7 +144,7 @@ impl Scripts {
             if let Some(ast) = &script.ast {
                 ast.clone()
             } else {
-                let ast = engine.borrow_mut().compile(wrap_script(&script.text))?;
+                let ast = engine.borrow().compile(wrap_script(&script.text))?;
                 script.ast = Some(ast);
                 script.ast.as_ref().unwrap().clone()
             }
@@ -203,10 +200,6 @@ impl Scripts {
         self.0.borrow().range.end() + 1
     }
 
-    pub fn key_count(&self) -> usize {
-        self.0.borrow().scripts.keys().len()
-    }
-
     pub fn nth_key(&self, n: usize) -> Option<String> {
         self.0.borrow().scripts.keys().nth(n).cloned()
     }
@@ -228,6 +221,9 @@ pub struct ScriptGuard<'a> {
 impl ScriptGuard<'_> {
     pub fn values(&self) -> &HashMap<String, BTreeMap<usize, f64>> {
         &self.guard.values
+    }
+    pub fn scripts(&self) -> &BTreeMap<String, Script> {
+        &self.guard.scripts
     }
 }
 pub struct ScriptGuardMut<'a> {
