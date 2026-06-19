@@ -78,9 +78,10 @@ impl Table {
         );
 
         if col_nr >= self.num_sticky_cols {
+            let flattened_headers: Vec<_> = self.groups.iter().flat_map(|g| g.1.iter()).collect();
             let key_index = col_nr - self.num_sticky_cols;
-            if let Some(key) = (self.scripts.nth_key(key_index))
-                && let Some(b) = self.scripts.borrow().values().get(&key)
+            if let Some(key) = flattened_headers.get(key_index)
+                && let Some(b) = self.scripts.borrow().values().get(*key)
                 && let Some(v) = b.get(&(row_nr as usize))
             {
                 let text = format!("{:.2}", v);

@@ -113,7 +113,7 @@ impl Scripts {
                 .iter()
                 .map(|s| format!("({}, {})", s.0, s.1))
                 .collect();
-            call_stack.pop();
+            call_stack.clear();
             let stack = stack.join(" -> ");
 
             return Err(EvalAltResult::ErrorRuntime(
@@ -124,7 +124,7 @@ impl Scripts {
         }
         call_stack.push((key.clone(), row));
         if !range.contains(&row) {
-            call_stack.pop();
+            call_stack.clear();
             return Err(EvalAltResult::ErrorRuntime(
                 (format!(
                     "Row index {row} of \"{key}\" out of range [{},{}]",
@@ -150,7 +150,7 @@ impl Scripts {
                 script.ast.as_ref().unwrap().clone()
             }
         } else {
-            call_stack.pop();
+            call_stack.clear();
             return Err(
                 EvalAltResult::ErrorModuleNotFound(key.to_owned(), Position::default()).into(),
             );
@@ -164,7 +164,7 @@ impl Scripts {
             {
                 Ok(value) => value,
                 Err(e) => {
-                    self.0.borrow_mut().call_stack.pop();
+                    self.0.borrow_mut().call_stack.clear();
                     return Err(Box::new(*e));
                 }
             };
@@ -207,10 +207,6 @@ impl Scripts {
     }
     pub fn num_rows(&self) -> usize {
         self.0.borrow().range.end() + 1
-    }
-
-    pub fn nth_key(&self, n: usize) -> Option<String> {
-        self.0.borrow().scripts.keys().nth(n).cloned()
     }
 
     pub fn borrow(&self) -> ScriptGuard<'_> {
