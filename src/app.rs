@@ -1,4 +1,4 @@
-use std::fs;
+use std::{fs, path::PathBuf};
 
 use egui::{Label, RichText, Widget};
 use egui_tiles::Tree;
@@ -23,7 +23,7 @@ impl Default for App {
     fn default() -> Self {
         Self {
             key: String::new(),
-            file_path: "./data.txt".to_owned(),
+            file_path: "./data".to_owned(),
             table: Table::default(),
             error: None,
             tree: create_tree(),
@@ -76,8 +76,25 @@ impl eframe::App for App {
                         if let Err(e) = ron::ser::to_string(&self)
                             .map_err(|e| e.to_string())
                             .and_then(|s| {
-                                fs::write(self.file_path.clone(), s.as_bytes())
+                                fs::create_dir_all(&self.file_path).map_err(|e| e.to_string())?;
+                                fs::write(self.file_path.clone() + "/data.ron", s.as_bytes())
                                     .map_err(|e| e.to_string())
+                            })
+                            .and_then(|_: ()| {
+                                let scripts: Vec<_> = self
+                                    .table
+                                    .scripts
+                                    .borrow()
+                                    .scripts()
+                                    .iter()
+                                    .map(|(k, s)| format!("{k}\n\n{}", s.text))
+                                    .collect();
+                                // let dir = PathBuf::from(self.file_path).
+                                fs::write(
+                                    self.file_path.clone() + "/scripts.txt",
+                                    scripts.join("\n\n\n"),
+                                )
+                                .map_err(|e| e.to_string())
                             })
                         {
                             self.error = Some(e);
