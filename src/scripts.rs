@@ -73,6 +73,10 @@ impl Scripts {
                 // eprintln!("top level call of {key} {i}");
 
                 // Should have popped off the stack.
+                if !self.0.borrow().call_stack.is_empty() {
+                    let stack = format_stack(&self.0.borrow().call_stack);
+                    panic!("expected empty call stack, found {stack}");
+                }
                 assert!(self.0.borrow_mut().call_stack.is_empty());
 
                 match self.eval_one(None, key, i) {
@@ -109,12 +113,8 @@ impl Scripts {
         } = &mut *inner;
         if call_stack.contains(&(key.clone(), row)) {
             call_stack.push((key.clone(), row));
-            let stack: Vec<String> = call_stack
-                .iter()
-                .map(|s| format!("({}, {})", s.0, s.1))
-                .collect();
-            call_stack.clear();
-            let stack = stack.join(" -> ");
+            let stack = format_stack(call_stack);
+            call_stack.pop();
 
             return Err(EvalAltResult::ErrorRuntime(
                 ("Encountered dependency loop ".to_owned() + stack.as_str()).into(),
@@ -124,7 +124,7 @@ impl Scripts {
         }
         call_stack.push((key.clone(), row));
         if !range.contains(&row) {
-            call_stack.clear();
+            call_stack.pop();
             return Err(EvalAltResult::ErrorRuntime(
                 (format!(
                     "Row index {row} of \"{key}\" out of range [{},{}]",
@@ -145,12 +145,18 @@ impl Scripts {
             if let Some(ast) = &script.ast {
                 ast.clone()
             } else {
-                let ast = engine.borrow().compile(wrap_script(&script.text))?;
+                let ast = match engine.borrow().compile(wrap_script(&script.text)) {
+                    Ok(it) => it,
+                    Err(err) => {
+                        call_stack.pop();
+                        return Err(err.into());
+                    }
+                };
                 script.ast = Some(ast);
                 script.ast.as_ref().unwrap().clone()
             }
         } else {
-            call_stack.clear();
+            call_stack.pop();
             return Err(
                 EvalAltResult::ErrorModuleNotFound(key.to_owned(), Position::default()).into(),
             );
@@ -164,7 +170,7 @@ impl Scripts {
             {
                 Ok(value) => value,
                 Err(e) => {
-                    self.0.borrow_mut().call_stack.clear();
+                    self.0.borrow_mut().call_stack.pop();
                     return Err(Box::new(*e));
                 }
             };
@@ -218,6 +224,14 @@ impl Scripts {
         let guard = self.0.borrow_mut();
         ScriptGuardMut { guard }
     }
+}
+
+fn format_stack(call_stack: &[(String, usize)]) -> String {
+    let stack: Vec<String> = call_stack
+        .iter()
+        .map(|s| format!("({}, {})", s.0, s.1))
+        .collect();
+    stack.join(" -> ")
 }
 
 pub struct ScriptGuard<'a> {
