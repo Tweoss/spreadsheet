@@ -84,9 +84,14 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             }
             PaneKind::Scripts => {
                 ScrollArea::vertical().show(ui, |ui| {
+                    let flattened = self.table.groups.iter().flat_map(|g| g.1.iter());
                     let mut dirty = false;
                     let mut to_remove = HashSet::new();
-                    for (key, script) in self.table.scripts.borrow_mut().scripts().iter_mut() {
+                    let mut scripts = self.table.scripts.borrow_mut();
+                    for key in flattened {
+                        let script = scripts.scripts().get_mut(key).unwrap_or_else(|| {
+                            panic!("should have script for {key} when groups contains key {key}")
+                        });
                         ui.horizontal(|ui| {
                             if ui.button("X").clicked() {
                                 to_remove.insert(key.clone());
@@ -103,8 +108,12 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                             script.ast = None;
                         }
                     }
+                    drop(scripts);
                     for key in to_remove {
                         self.table.scripts.remove_script(&key);
+                        for group in self.table.groups.iter_mut() {
+                            group.1.retain(|k| k != &key);
+                        }
                     }
                     if dirty {
                         if let Err(e) = self.table.scripts.eval() {
@@ -120,6 +129,13 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                     if !self.key.is_empty() && !self.table.scripts.contains_key(self.key) && clicked
                     {
                         self.table.scripts.add_script(self.key.clone());
+                        if let Some(last) = self.table.groups.last_mut() {
+                            last.1.push(self.key.clone());
+                        } else {
+                            self.table
+                                .groups
+                                .push(("Remaining".to_string(), vec![self.key.clone()]));
+                        }
                         *self.key = String::new();
                     }
                 });
