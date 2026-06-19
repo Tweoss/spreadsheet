@@ -1,11 +1,11 @@
-use std::{collections::HashSet, fmt::Display};
+use std::fmt::Display;
 
-use egui::{ScrollArea, TextEdit, Widget};
 use egui_tiles::SimplificationOptions;
 
-use crate::{
+use crate::panes::{
     dnd::{DnDView, DragAndDropDemo},
-    table::TableDemo,
+    scripts::edit_scripts_ui,
+    table::Table,
 };
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -49,7 +49,7 @@ impl Display for PaneKind {
 }
 
 pub struct TreeBehavior<'a> {
-    pub table: &'a mut TableDemo,
+    pub table: &'a mut Table,
     pub error: &'a mut Option<String>,
     pub key: &'a mut String,
 }
@@ -83,62 +83,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                 }
             }
             PaneKind::Scripts => {
-                ScrollArea::vertical().show(ui, |ui| {
-                    let flattened = self.table.groups.iter().flat_map(|g| g.1.iter());
-                    let mut dirty = false;
-                    let mut to_remove = HashSet::new();
-                    let mut scripts = self.table.scripts.borrow_mut();
-                    for key in flattened {
-                        let script = scripts.scripts().get_mut(key).unwrap_or_else(|| {
-                            panic!("should have script for {key} when groups contains key {key}")
-                        });
-                        ui.horizontal(|ui| {
-                            if ui.button("X").clicked() {
-                                to_remove.insert(key.clone());
-                            }
-                            ui.heading(key);
-                        });
-
-                        if TextEdit::multiline(&mut script.text)
-                            .desired_rows(1)
-                            .ui(ui)
-                            .changed()
-                        {
-                            dirty = true;
-                            script.ast = None;
-                        }
-                    }
-                    drop(scripts);
-                    for key in to_remove {
-                        self.table.scripts.remove_script(&key);
-                        for group in self.table.groups.iter_mut() {
-                            group.1.retain(|k| k != &key);
-                        }
-                    }
-                    if dirty {
-                        if let Err(e) = self.table.scripts.eval() {
-                            *self.error = Some(e.to_string())
-                        } else {
-                            *self.error = None;
-                        }
-                    }
-
-                    ui.separator();
-                    ui.text_edit_singleline(self.key);
-                    let clicked = ui.button("Add Column").clicked();
-                    if !self.key.is_empty() && !self.table.scripts.contains_key(self.key) && clicked
-                    {
-                        self.table.scripts.add_script(self.key.clone());
-                        if let Some(last) = self.table.groups.last_mut() {
-                            last.1.push(self.key.clone());
-                        } else {
-                            self.table
-                                .groups
-                                .push(("Remaining".to_string(), vec![self.key.clone()]));
-                        }
-                        *self.key = String::new();
-                    }
-                });
+                edit_scripts_ui(self, ui);
             }
             PaneKind::Groups { view } => {
                 (DragAndDropDemo {

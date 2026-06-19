@@ -1,6 +1,5 @@
 mod app;
-mod dnd;
+mod panes;
 mod scripts;
-mod table;
 mod tree;
 pub use app::App;

@@ -6,7 +6,7 @@ use rhai::EvalAltResult;
 use crate::scripts::Scripts;
 
 #[derive(serde::Deserialize, serde::Serialize)]
-pub struct TableDemo {
+pub struct Table {
     num_sticky_cols: usize,
     default_column: egui_table::Column,
     auto_size_mode: egui_table::AutoSizeMode,
@@ -18,7 +18,7 @@ pub struct TableDemo {
     pub groups: Vec<(String, Vec<String>)>,
 }
 
-impl Default for TableDemo {
+impl Default for Table {
     fn default() -> Self {
         Self {
             num_sticky_cols: 1,
@@ -36,7 +36,7 @@ impl Default for TableDemo {
     }
 }
 
-impl TableDemo {
+impl Table {
     pub fn init(&mut self) -> Result<(), String> {
         self.scripts.init()?;
 
@@ -147,7 +147,7 @@ impl TableDemo {
     }
 }
 
-impl egui_table::TableDelegate for TableDemo {
+impl egui_table::TableDelegate for Table {
     fn prepare(&mut self, info: &egui_table::PrefetchInfo) {
         assert!(
             info.visible_rows.end <= self.scripts.num_rows() as u64,
@@ -269,7 +269,7 @@ impl egui_table::TableDelegate for TableDemo {
     }
 }
 
-impl TableDemo {
+impl Table {
     pub fn ui(&mut self, ui: &mut egui::Ui) -> Result<(), Box<EvalAltResult>> {
         let response = egui::Grid::new("settings").show(ui, |ui| {
             ui.label("Rows");

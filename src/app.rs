@@ -4,7 +4,7 @@ use egui::{Label, RichText, Widget};
 use egui_tiles::Tree;
 
 use crate::{
-    table::TableDemo,
+    panes::table::Table,
     tree::{Pane, PaneKind, TreeBehavior, create_tree},
 };
 
@@ -14,7 +14,7 @@ use crate::{
 pub struct App {
     key: String,
     file_path: String,
-    table: TableDemo,
+    table: Table,
     error: Option<String>,
     tree: Tree<Pane>,
 }
@@ -24,7 +24,7 @@ impl Default for App {
         Self {
             key: String::new(),
             file_path: "./data.txt".to_owned(),
-            table: TableDemo::default(),
+            table: Table::default(),
             error: None,
             tree: create_tree(),
         }
