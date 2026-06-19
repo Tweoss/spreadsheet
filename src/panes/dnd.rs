@@ -51,20 +51,18 @@ impl DragAndDropDemo<'_> {
                     // Only allow deletion and column DnD if there's another column to move to.
                     if column_count > 1 {
                         ui.horizontal(|ui| {
-                            ui.set_min_size(vec2(64.0, 40.0));
+                            // Upon deletion of this column, move contents to another column.
+                            if ui.button("X").clicked() {
+                                let other_index = if col_idx == 0 { 1 } else { col_idx - 1 };
+                                let [other, current] = self
+                                    .columns
+                                    .get_disjoint_mut([other_index, col_idx])
+                                    .unwrap();
+                                other.1.append(&mut current.1);
+                                self.columns.remove(col_idx);
+                            }
                             let dropped = ui
                                 .dnd_drag_source(col_id, ColLocation { col_idx }, |ui| {
-                                    // Upon deletion of this column, move contents to another column.
-                                    if ui.button("X").clicked() {
-                                        let other_index =
-                                            if col_idx == 0 { 1 } else { col_idx - 1 };
-                                        let [other, current] = self
-                                            .columns
-                                            .get_disjoint_mut([other_index, col_idx])
-                                            .unwrap();
-                                        other.1.append(&mut current.1);
-                                        self.columns.remove(col_idx);
-                                    }
                                     ui.heading(label);
                                     // Fill out the column with the frame background color
                                     // (and make it draggable)
@@ -101,7 +99,8 @@ impl DragAndDropDemo<'_> {
                     } else {
                         ui.heading(label);
                     }
-                    ui.dnd_drop_zone::<Location, ()>(frame, |ui| {
+                    // Detect drops onto the background of a list.
+                    if let (_, Some(v)) = ui.dnd_drop_zone::<Location, ()>(frame, |ui| {
                         ui.set_min_size(vec2(64.0, 40.0));
                         ui.allocate_space(vec2(ui.available_width(), 0.0));
 
@@ -112,9 +111,7 @@ impl DragAndDropDemo<'_> {
                                 row: row_idx,
                             };
                             let response = ui
-                                .dnd_drag_source(item_id, item_location, |ui| {
-                                    ui.label(item).hovered();
-                                })
+                                .dnd_drag_source(item_id, item_location, |ui| ui.label(item))
                                 .response;
 
                             // Detect drops onto this item:
@@ -150,7 +147,13 @@ impl DragAndDropDemo<'_> {
                                 }
                             }
                         }
-                    });
+                    }) {
+                        from = Some(v);
+                        to = Some(Location {
+                            col: col_idx,
+                            row: 0,
+                        });
+                    };
                 });
             }
         });
